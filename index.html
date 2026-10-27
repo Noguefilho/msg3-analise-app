@@ -1,0 +1,1363 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>AP-737 MCC: Análise MSG-3 (Sistemas)</title>
+	<script src="https://cdn.tailwindcss.com"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
+    
+	<script type="module">
+		import { initializeApp } from "https://www.gstatic.com/firebasejs/9.15.0/firebase-app.js";
+		import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/9.15.0/firebase-auth.js";
+		import { getFirestore, doc, setDoc, collection, getDocs, getDoc } from "https://www.gstatic.com/firebasejs/9.15.0/firebase-firestore.js";
+        
+		const firebaseConfig = {
+			apiKey: "AIzaSyBV2RDKb8QQnoixjo5VGxnDGiESaVkN0D0",
+			authDomain: "msg-3-dc818.firebaseapp.com",
+			projectId: "msg-3-dc818",
+			storageBucket: "msg-3-dc818.firebasestorage.app",
+			messagingSenderId: "761143583331",
+			appId: "1:761143583331:web:6c4591e181fa54b39b4e56",
+			measurementId: "G-Y5FBQLYKSP"
+		};
+
+		const app = initializeApp(firebaseConfig);
+		const auth = getAuth(app);
+		const db = getFirestore(app);
+		let currentUserId = null;
+		let currentAnalysisId = null;
+
+		onAuthStateChanged(auth, (user) => { if (user) { currentUserId = user.uid; document.getElementById('userStatus').textContent = user.email; document.getElementById('logoutBtn').classList.remove('hidden'); document.getElementById('authModal').classList.add('hidden'); document.getElementById('mainContent').classList.remove('hidden'); if (!currentAnalysisId) { newAnalysis(); } } else { currentUserId = null; document.getElementById('logoutBtn').classList.add('hidden'); document.getElementById('authModal').classList.remove('hidden'); document.getElementById('mainContent').classList.add('hidden'); } });
+		window.registerUser = () => { const email = document.getElementById('emailInput').value; const pass = document.getElementById('passInput').value; createUserWithEmailAndPassword(auth, email, pass).catch(err => showMessage(err.message, 'error')); };
+		window.loginUser = () => { const email = document.getElementById('emailInput').value; const pass = document.getElementById('passInput').value; signInWithEmailAndPassword(auth, email, pass).catch(err => showMessage(err.message, 'error')); };
+		window.logoutUser = () => signOut(auth);
+
+		function collectCurrentData() {
+			const data = { 
+				msiNumber: document.getElementById('msiNumber').value.trim(),
+				msiTitle: document.getElementById('msiTitle').value.trim(), 
+				msiDescription: document.getElementById('msiDescription').value.trim(), 
+				msiCriteria: {}, 
+				components: [], 
+				fmea: [], 
+				taskCounter: 0
+			};
+			data.msiCriteria = { q1_safety: { answer: document.querySelector('input[name="msi_q1_safety"]:checked')?.value || null, justification: document.getElementById('just_q1').value }, q2_undetectable: { answer: document.querySelector('input[name="msi_q2_undetectable"]:checked')?.value || null, justification: document.getElementById('just_q2').value }, q3_operational: { answer: document.querySelector('input[name="msi_q3_operational"]:checked')?.value || null, justification: document.getElementById('just_q3').value }, q4_economic: { answer: document.querySelector('input[name="msi_q4_economic"]:checked')?.value || null, justification: document.getElementById('just_q4').value } };
+			document.querySelectorAll('.component-block').forEach(block => { const inputs = block.querySelectorAll('input'); data.components.push({ id: block.dataset.componentId, ata: inputs[0].value, name: inputs[1].value, supplier: inputs[2].value, partNumber: inputs[3].value, mtbf: inputs[4].value, mtbur: inputs[5].value }); });
+			document.querySelectorAll('.function-block').forEach(funcBlock => {
+				const functionData = { functionText: funcBlock.querySelector('[data-fmea="function"]').value, failures: [] };
+				funcBlock.querySelectorAll('.failure-block').forEach(failBlock => {
+					const failId = failBlock.dataset.failureId;
+					const failureData = {
+						failureText: failBlock.querySelector('[data-fmea="failure"]').value, effectText: failBlock.querySelector('[data-fmea="effect"]').value,
+						level1: { q1: { answer: document.querySelector(`input[name="lvl1_q1_${failId}"]:checked`)?.value || null, justification: document.getElementById(`lvl1_q1_just_${failId}`).value }, q2: { answer: document.querySelector(`input[name="lvl1_q2_${failId}"]:checked`)?.value || null, justification: document.getElementById(`lvl1_q2_just_${failId}`).value }, q3: { answer: document.querySelector(`input[name="lvl1_q3_${failId}"]:checked`)?.value || null, justification: document.getElementById(`lvl1_q3_just_${failId}`).value }, q4: { answer: document.querySelector(`input[name="lvl1_q4_${failId}"]:checked`)?.value || null, justification: document.getElementById(`lvl1_q4_just_${failId}`).value }, fec: failBlock.querySelector('.level1-result')?.dataset.fec || null },
+						causes: []
+					};
+					failBlock.querySelectorAll('.cause-input-group').forEach(causeGroup => {
+						const causeId = causeGroup.dataset.causeId;
+						failureData.causes.push({
+							componentId: causeGroup.querySelector('select[data-fmea="cause-select"]').value, causeNotes: causeGroup.querySelector('input[data-fmea="cause-notes"]').value,
+							level2: {
+								t1: { answer: document.querySelector(`input[name="lvl2_t1_${causeId}"]:checked`)?.value || null, task: document.getElementById(`lvl2_t1_task_${causeId}`).value, interval: document.getElementById(`lvl2_t1_interval_${causeId}`).value, justification: document.getElementById(`lvl2_t1_just_${causeId}`).value, intervalJustification: (document.getElementById(`lvl2_t1_interval_just_${causeId}`) ? document.getElementById(`lvl2_t1_interval_just_${causeId}`).value : '') },
+								t2: { answer: document.querySelector(`input[name="lvl2_t2_${causeId}"]:checked`)?.value || null, task: document.getElementById(`lvl2_t2_task_${causeId}`).value, interval: document.getElementById(`lvl2_t2_interval_${causeId}`).value, justification: document.getElementById(`lvl2_t2_just_${causeId}`).value, intervalJustification: (document.getElementById(`lvl2_t2_interval_just_${causeId}`) ? document.getElementById(`lvl2_t2_interval_just_${causeId}`).value : '') },
+								t3: { answer: document.querySelector(`input[name="lvl2_t3_${causeId}"]:checked`)?.value || null, task: document.getElementById(`lvl2_t3_task_${causeId}`).value, interval: document.getElementById(`lvl2_t3_interval_${causeId}`).value, justification: document.getElementById(`lvl2_t3_just_${causeId}`).value, intervalJustification: (document.getElementById(`lvl2_t3_interval_just_${causeId}`) ? document.getElementById(`lvl2_t3_interval_just_${causeId}`).value : '') },
+								t4: { answer: document.querySelector(`input[name="lvl2_t4_${causeId}"]:checked`)?.value || null, task: document.getElementById(`lvl2_t4_task_${causeId}`).value, interval: document.getElementById(`lvl2_t4_interval_${causeId}`).value, justification: document.getElementById(`lvl2_t4_just_${causeId}`).value, intervalJustification: (document.getElementById(`lvl2_t4_interval_just_${causeId}`) ? document.getElementById(`lvl2_t4_interval_just_${causeId}`).value : '') },
+								t5: { answer: document.querySelector(`input[name="lvl2_t5_${causeId}"]:checked`)?.value || null, task: document.getElementById(`lvl2_t5_task_${causeId}`).value, interval: document.getElementById(`lvl2_t5_interval_${causeId}`).value, justification: document.getElementById(`lvl2_t5_just_${causeId}`).value, intervalJustification: (document.getElementById(`lvl2_t5_interval_just_${causeId}`) ? document.getElementById(`lvl2_t5_interval_just_${causeId}`).value : '') },
+								t6: { answer: document.querySelector(`input[name="lvl2_t6_${causeId}"]:checked`)?.value || null, task: document.getElementById(`lvl2_t6_task_${causeId}`).value, interval: document.getElementById(`lvl2_t6_interval_${causeId}`).value, justification: document.getElementById(`lvl2_t6_just_${causeId}`).value, intervalJustification: (document.getElementById(`lvl2_t6_interval_just_${causeId}`) ? document.getElementById(`lvl2_t6_interval_just_${causeId}`).value : '') }
+							}
+						});
+					});
+					functionData.failures.push(failureData);
+				});
+				data.fmea.push(functionData);
+			});
+			return data;
+		}
+
+		window.saveAnalysis = async () => { if (!currentUserId) { return showMessage("Erro: Usuário não autenticado.", "error"); } const analysisData = collectCurrentData(); if (!analysisData.msiTitle) { return showMessage("Por favor, preencha o Título do MSI antes de salvar.", "error"); } showMessage("Coletando e salvando dados...", "info"); analysisData.lastUpdatedAt = new Date().toISOString(); try { const docId = currentAnalysisId || `${Date.now()}`; const docRef = doc(db, "users", currentUserId, "analyses", docId); await setDoc(docRef, analysisData); currentAnalysisId = docId; showMessage(`Análise "${analysisData.msiTitle}" salva com sucesso!`, "success"); } catch (error) { console.error("Erro ao salvar no Firestore: ", error); showMessage("Falha ao salvar. Erro: " + error.message, "error"); } };
+		window.loadAnalysesList = async () => { if (!currentUserId) return; const listContainer = document.getElementById('analysesList'); listContainer.innerHTML = '<p>Carregando...</p>'; const analysesRef = collection(db, "users", currentUserId, "analyses"); const querySnapshot = await getDocs(analysesRef); listContainer.innerHTML = ''; if (querySnapshot.empty) { listContainer.innerHTML = '<p>Nenhuma análise salva.</p>'; } else { querySnapshot.forEach(doc => { const data = doc.data(); const item = document.createElement('div'); item.className = 'flex justify-between items-center p-2 hover:bg-gray-100 rounded-md'; item.innerHTML = `<span class="font-medium">${data.msiTitle || 'Análise Sem Título'}</span><button class="px-3 py-1 bg-blue-500 text-white text-sm rounded-md" onclick="loadSpecificAnalysis('${doc.id}')">Carregar</button>`; listContainer.appendChild(item); }); } };
+		window.loadSpecificAnalysis = async (docId) => { const docRef = doc(db, "users", currentUserId, "analyses", docId); const docSnap = await getDoc(docRef); if (docSnap.exists()) { currentAnalysisId = docId; populateForm(docSnap.data()); document.getElementById('loadModal').classList.add('hidden'); showMessage('Análise carregada com sucesso!', 'success'); } else { showMessage('Erro: Análise não encontrada.', 'error'); } };
+        
+		function populateForm(data) {
+	resetForm(false);
+	document.getElementById('msiNumber').value = data.msiNumber || '';
+	document.getElementById('msiTitle').value = data.msiTitle || '';
+	document.getElementById('msiDescription').value = data.msiDescription || '';
+	if(data.msiCriteria) { Object.keys(data.msiCriteria).forEach(key => { const criteria = data.msiCriteria[key]; if (!criteria) return; const radio = document.querySelector(`input[name="msi_${key}"][value="${criteria.answer}"]`); if (radio) radio.checked = true; const justId = `just_${key.split('_')[0]}`; const justInput = document.getElementById(justId); if(justInput) { justInput.value = criteria.justification || ''; } }); }
+	if (data.components && Array.isArray(data.components)) { data.components.forEach(compData => addComponente(compData)); }
+	if (data.fmea && Array.isArray(data.fmea)) {
+		data.fmea.forEach(funcData => {
+			const funcId = addFunction(funcData);
+			if (funcData.failures && Array.isArray(funcData.failures)) {
+				funcData.failures.forEach(failData => {
+					const failId = addFailure(funcId, failData);
+					const causesContainer = document.querySelector(`[data-failure-id="${failId}"] .causes-container`);
+					causesContainer.innerHTML = '<label class="fmea-label text-xs">Causas da Falha</label>';
+					if (failData.causes && Array.isArray(failData.causes) && failData.causes.length > 0) {
+						failData.causes.forEach(causeData => {
+							const causeId = addCause(failId, causeData);
+							if (causeData.level2) { for (let i = 1; i <= 6; i++) { const taskKey = `t${i}`; if (causeData.level2[taskKey]) { const { answer, task, interval, justification } = causeData.level2[taskKey]; if (answer) { const radio = document.querySelector(`input[name="lvl2_${taskKey}_${causeId}"][value="${answer}"]`); if(radio) radio.checked = true; } const taskInput = document.getElementById(`lvl2_${taskKey}_task_${causeId}`); if (taskInput) taskInput.value = task || ''; const intervalInput = document.getElementById(`lvl2_${taskKey}_interval_${causeId}`); if(intervalInput) intervalInput.value = interval || ''; const intervalJustInput = document.getElementById(`lvl2_${taskKey}_interval_just_${causeId}`); if (intervalJustInput) intervalJustInput.value = (causeData.level2[taskKey].intervalJustification || ''); const justInput = document.getElementById(`lvl2_${taskKey}_just_${causeId}`); if (justInput) justInput.value = justification || ''; } } }
+						});
+					} else { addCause(failId); }
+					if (failData.level1) {
+						['q1', 'q2', 'q3', 'q4'].forEach(q => { if(failData.level1[q]) { const answer = failData.level1[q].answer; const justification = failData.level1[q].justification; if (answer) { const radio = document.querySelector(`input[name="lvl1_${q}_${failId}"][value="${answer}"]`); if(radio) { radio.checked = true; } } const justInput = document.getElementById(`lvl1_${q}_just_${failId}`); if (justInput) justInput.value = justification || ''; } }); 
+						// Após preencher os rádios, uma única chamada para analyzeLevel1 restaura
+						// tanto a visibilidade das perguntas quanto o resultado do FEC.
+						analyzeLevel1(failId);
+					}
+				});
+			}
+		});
+	}
+}
+		window.newAnalysis = () => { currentAnalysisId = null; resetForm(true); showMessage('Novo formulário de análise pronto.', 'info'); };
+		function getQuestionText(key, level = 1) { const questionsLvl0={q1:'A falha deste candidato a MSI poderia afetar a segurança em voo ou em solo?',q2:'A falha deste candidato a MSI é indetectable durante as operações normais?',q3:'A falha deste candidato a MSI poderia ter impacto operacional significativo?',q4:'A falha deste candidato a MSI poderia ter impacto econômico significativo?'}; const questionsLvl1 = { q1: 'Q1. A falha é evidente para a tripulação?', q2: 'Q2. A falha tem efeito adverso na segurança?', q3: 'Q3. A falha oculta, combinada com outra, afeta a segurança?', q4: 'Q4. A falha tem efeito adverso na capacidade operacional?' }; const questionsLvl2 = { t1: 'T1. Lubrificação/Serviço?', t2: 'T2. Verificação Operacional?', t3: 'T3. Inspeção/Verificação Funcional?', t4: 'T4. Restauração?', t5: 'T5. Descarte?', t6: 'T6. Combinação de Tarefas?' }; if(level === 0) return questionsLvl0[key] || key; if (level === 1) return questionsLvl1[key] || key; return questionsLvl2[key] || key; }
+        
+		window.handleQuestionChange = (failId, questionNum, value) => {
+			const q2 = document.getElementById(`lvl1_q2_block_${failId}`); const q3 = document.getElementById(`lvl1_q3_block_${failId}`); const q4 = document.getElementById(`lvl1_q4_block_${failId}`);
+			if (questionNum === 'q1') {
+				if (value === 'Y') {
+					q2.classList.remove('hidden');
+					q3.classList.add('hidden');
+					q4.classList.add('hidden'); // Garante que q4 comece oculto
+				} else { // value === 'N'
+					q2.classList.add('hidden');
+					q3.classList.remove('hidden');
+					q4.classList.add('hidden'); // Garante que q4 comece oculto
+				}
+			}
+			if (questionNum === 'q2' && value === 'N') { q4.classList.remove('hidden'); } 
+			else if (questionNum === 'q2' && value === 'Y') { q4.classList.add('hidden'); }
+
+			analyzeLevel1(failId); // Analisa o resultado sempre que uma pergunta é alterada
+		};
+        
+		window.analyzeLevel1 = (failId) => {
+			const q1 = document.querySelector(`input[name="lvl1_q1_${failId}"]:checked`)?.value;
+			const q2 = document.querySelector(`input[name="lvl1_q2_${failId}"]:checked`)?.value;
+			const q3 = document.querySelector(`input[name="lvl1_q3_${failId}"]:checked`)?.value;
+			const q4 = document.querySelector(`input[name="lvl1_q4_${failId}"]:checked`)?.value;
+			let fec = null;
+            
+			if (q1 === 'Y') {
+				if (q2 === 'Y') {
+					fec = 5;
+				} else if (q2 === 'N') {
+					if (q4 === 'Y') {
+						fec = 6;
+					} else if (q4 === 'N') {
+						fec = 7;
+					}
+				}
+			} else if (q1 === 'N') {
+				if (q3 === 'Y') {
+					fec = 8;
+				} else if (q3 === 'N') {
+					fec = 9;
+				}
+			}
+            
+			const failureBlock = document.querySelector(`[data-failure-id="${failId}"]`);
+			const causesSection = failureBlock.querySelector('.causes-container');
+			const addCauseButton = failureBlock.querySelector('button[onclick^="addCause"]');
+            
+			if (fec) {
+				// Mostra o resultado do nível 1
+				displayLevel1Result(failId, fec);
+                
+				// Mostra a seção de causas e o botão
+				causesSection.classList.remove('hidden');
+				causesSection.classList.add('visible');
+				addCauseButton.classList.remove('hidden');
+				addCauseButton.classList.add('visible');
+                
+				// Se não houver causas, adiciona uma automaticamente
+				if (causesSection.children.length <= 1) {
+					addCause(failId);
+				}
+                
+				// Mostra a análise de nível 2 para cada causa
+				showLevel2Questions(failId, fec);
+                
+				// Rola a página para a seção de causas suavemente
+				setTimeout(() => {
+					causesSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+				}, 100);
+			} else {
+				// Se não há FEC determinado, oculta seções relacionadas
+				displayLevel1Result(failId, null);
+				causesSection.classList.add('hidden');
+				causesSection.classList.remove('visible');
+				addCauseButton.classList.add('hidden');
+				addCauseButton.classList.remove('visible');
+			}
+		};
+
+		function displayLevel1Result(failId, fec) {
+			const fecMap = {
+				5: { cat: "FEC 5: Evidente - Segurança", color: 'bg-red-100 border-red-500 text-red-800' },
+				6: { cat: "FEC 6: Evidente - Operacional", color: 'bg-orange-100 border-orange-500 text-orange-800' },
+				7: { cat: "FEC 7: Evidente - Econômica", color: 'bg-yellow-100 border-yellow-500 text-yellow-800' },
+				8: { cat: "FEC 8: Oculta - Segurança", color: 'bg-purple-100 border-purple-500 text-purple-800' },
+				9: { cat: "FEC 9: Oculta - Não-Segurança", color: 'bg-blue-100 border-blue-500 text-blue-800' }
+			};
+            
+			const result = fecMap[fec];
+			const failureBlock = document.querySelector(`[data-failure-id="${failId}"]`);
+			const resultsSection = failureBlock.querySelector('.level1-result');
+			const causesSection = failureBlock.querySelector('.causes-container');
+			const addCauseButton = failureBlock.querySelector('button[onclick^="addCause"]');
+
+			// Remove todas as classes de cores anteriores
+			resultsSection.className = 'level1-result mt-4 p-3 rounded-lg border';
+            
+			if (result) {
+				// Atualiza o conteúdo e estilo do resultado
+				resultsSection.innerHTML = `
+					<div class="flex items-center justify-between">
+						<h4 class="font-bold level1-result-category">${result.cat}</h4>
+						<span class="text-sm opacity-75">Clique para ver detalhes</span>
+					</div>`;
+				resultsSection.classList.add(...result.color.split(" "));
+				resultsSection.dataset.fec = fec;
+				resultsSection.classList.remove('hidden');
+                
+				// Adiciona efeito de hover
+				resultsSection.style.cursor = 'pointer';
+				resultsSection.style.transition = 'all 0.3s ease';
+                
+				// Mostra seções relacionadas com animação
+				setTimeout(() => {
+					causesSection.classList.remove('hidden');
+					causesSection.classList.add('visible');
+                    
+					addCauseButton.classList.remove('hidden');
+					addCauseButton.classList.add('visible');
+                    
+					// Se não houver causas, adiciona uma automaticamente
+					if (causesSection.children.length <= 1) {
+						addCause(failId);
+					}
+                    
+					// Mostra análise de nível 2 para as causas existentes
+					showLevel2Questions(failId, fec);
+				}, 100);
+
+				// Rola a página para a seção de causas com atraso para animação
+				setTimeout(() => {
+					causesSection.scrollIntoView({ 
+						behavior: 'smooth', 
+						block: 'start'
+					});
+				}, 300);
+			} else {
+				// Oculta seções quando não há resultado
+				resultsSection.classList.add('hidden');
+				causesSection.classList.remove('visible');
+				causesSection.classList.add('hidden');
+				addCauseButton.classList.remove('visible');
+				addCauseButton.classList.add('hidden');
+                
+				// Oculta todos os blocos de nível 2
+				const level2Blocks = failureBlock.querySelectorAll('.level2-analysis-block');
+				level2Blocks.forEach(block => {
+					block.classList.remove('visible');
+					block.classList.add('hidden');
+				});
+			}
+		}
+        
+		function showLevel2Questions(failId, fec) {
+			const failureBlock = document.querySelector(`[data-failure-id="${failId}"]`);
+			if (!failureBlock) return;
+			const causesContainer = failureBlock.querySelector('.causes-container');
+			const addCauseButton = failureBlock.querySelector('.add-cause-button');
+
+			// Normaliza fec para número (datasets são strings)
+			const fecNum = Number(fec);
+
+			// Só prossegue se fecNum for um inteiro válido entre 5 e 9 (FECs esperados)
+			if (!Number.isInteger(fecNum) || fecNum < 5 || fecNum > 9) {
+				// Não mostrar análise nível 2 se o nível 1 não estiver realmente analisado
+				// UX: mostra uma nota discreta explicando que o nível 2 está bloqueado até o Nível 1 ser finalizado
+				if (causesContainer) {
+					causesContainer.classList.remove('hidden'); causesContainer.classList.add('visible');
+					// evita duplicação da nota
+					if (!failureBlock.querySelector('.level2-locked-note')) {
+						const note = document.createElement('p');
+						note.className = 'level2-locked-note text-sm text-gray-600 italic';
+						note.textContent = 'Análise Nível 2 bloqueada: finalize a Análise de Nível 1 (clique em "Analisar Nível 1") para liberar as tarefas.';
+						causesContainer.insertBefore(note, causesContainer.firstChild);
+					}
+				}
+				return;
+			}
+
+			// Remove nota de bloqueio se existir
+			const existingNote = failureBlock.querySelector('.level2-locked-note');
+			if (existingNote) existingNote.remove();
+
+			// Primeiro, garante que o container de causas e o botão estejam visíveis
+			if (causesContainer) {
+				causesContainer.classList.remove('hidden');
+				causesContainer.classList.add('visible');
+			}
+			if (addCauseButton) {
+				addCauseButton.classList.remove('hidden');
+				addCauseButton.classList.add('visible');
+			}
+
+			// Se não houver causas ainda, adiciona uma automaticamente
+			if (causesContainer && causesContainer.children.length <= 1) {
+				addCause(failId);
+			}
+
+			// Determina quais tipos de tarefas devem ser mostradas com base no FEC
+			const isSafety = (fecNum === 5 || fecNum === 8);
+			const isHidden = (fecNum === 8 || fecNum === 9);
+
+			// Procura todas as causas existentes para esta falha
+			const causeGroups = document.querySelectorAll(`[data-failure-id="${failId}"] .cause-input-group`);
+
+			causeGroups.forEach(group => {
+				const causeId = group.dataset.causeId;
+				const level2Block = document.getElementById(`level2_analysis_block_${causeId}`);
+				if (!level2Block) {
+					console.warn(`level2 block not found for cause ${causeId} (fail ${failId}`);
+					return;
+				}
+
+				// Mostra o bloco de nível 2
+				setTimeout(() => {
+					level2Block.classList.remove('hidden');
+					level2Block.classList.add('visible');
+					level2Block.style.maxHeight = (level2Block.scrollHeight + 200) + 'px';
+					const finishBtn = level2Block.querySelector('button');
+					if (finishBtn) { finishBtn.classList.remove('hidden'); finishBtn.style.display = 'block'; }
+					try { level2Block.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
+				}, 50);
+
+				// Assegura que todos os blocos de tarefa existam e não estejam ocultos por padrão
+				const parentContainer = level2Block.querySelector('.space-y-3') || level2Block;
+				for (let i = 1; i <= 6; i++) {
+					const tid = `lvl2_t${i}_block_${causeId}`;
+					let taskEl = document.getElementById(tid);
+					if (!taskEl) {
+						// cria dinamicamente se estiver faltando
+						taskEl = document.createElement('div');
+						taskEl.id = tid;
+						taskEl.className = 'task-card';
+						const p = document.createElement('p');
+						p.textContent = getQuestionText(`t${i}`, 2);
+						taskEl.appendChild(p);
+						const inputs = document.createElement('div');
+						inputs.className = 'task-inputs';
+						const radioWrap = document.createElement('div'); radioWrap.className = 'radio-group';
+						const labelY = document.createElement('label'); const rY = document.createElement('input'); rY.type = 'radio'; rY.name = `lvl2_t${i}_${causeId}`; rY.value = 'Y'; labelY.appendChild(rY); labelY.append(' Sim');
+						const labelN = document.createElement('label'); const rN = document.createElement('input'); rN.type = 'radio'; rN.name = `lvl2_t${i}_${causeId}`; rN.value = 'N'; labelN.appendChild(rN); labelN.append(' Não');
+						radioWrap.appendChild(labelY); radioWrap.appendChild(labelN);
+						const taskInput = document.createElement('input'); taskInput.type = 'text'; taskInput.id = `lvl2_t${i}_task_${causeId}`; taskInput.placeholder = 'Descrição da Tarefa...'; taskInput.className = 'task-input';
+						const intervalInput = document.createElement('input'); intervalInput.type = 'text'; intervalInput.id = `lvl2_t${i}_interval_${causeId}`; intervalInput.placeholder = 'Intervalo...'; intervalInput.className = 'task-input';
+						const justInput = document.createElement('input'); justInput.type = 'text'; justInput.id = `lvl2_t${i}_just_${causeId}`; justInput.placeholder = 'Justificativa...'; justInput.className = 'task-input';
+						// Campo oculto para justificativa do intervalo
+						const intervalJustInput = document.createElement('input'); intervalJustInput.type = 'hidden'; intervalJustInput.id = `lvl2_t${i}_interval_just_${causeId}`;
+						inputs.appendChild(radioWrap); inputs.appendChild(taskInput); inputs.appendChild(intervalInput); inputs.appendChild(justInput); inputs.appendChild(intervalJustInput);
+						taskEl.appendChild(inputs);
+						parentContainer.appendChild(taskEl);
+					}
+					// Remove qualquer classe 'hidden' pré-existente
+					taskEl.classList.remove('hidden');
+				}
+
+				// Agora aplica as regras específicas: T2 somente para falhas ocultas; T6 somente para segurança
+				const t2 = document.getElementById(`lvl2_t2_block_${causeId}`);
+				const t6 = document.getElementById(`lvl2_t6_block_${causeId}`);
+				if (t2) { if (!isHidden) t2.classList.add('hidden'); else t2.classList.remove('hidden'); }
+				if (t6) { if (!isSafety) t6.classList.add('hidden'); else t6.classList.remove('hidden'); }
+			});
+		}
+        
+		window.analyzeLevel2 = (causeId) => { alert(`Botão "Finalizar Análise" para a causa #${causeId} funcionando!`); };
+
+		// --- TESTES AUTOMATIZADOS ---
+		window.runAutomatedTests = async function() {
+			const results = [];
+			console.group('Automated Tests: MSG-3 UI');
+			try {
+				// Limpa e cria um novo cenário mínimo
+				resetForm(true);
+				// Adiciona um componente, função, falha e causa
+				const compId = addComponente({ name: 'CompTest' });
+				const funcId = addFunction();
+				const failId = addFailure(funcId, { failureText: 'FTest', effectText: 'ETest' });
+				const causeId = addCause(failId);
+
+				// 1) Antes de analisar Nível 1: Nível 2 deve estar bloqueado (nota presente)
+				await new Promise(r => setTimeout(r, 120)); // espera DOM
+				const failureBlock = document.querySelector(`[data-failure-id="${failId}"]`);
+				const causesContainer = failureBlock.querySelector('.causes-container');
+				const note = causesContainer.querySelector('.level2-locked-note');
+				const beforeBlocked = !!note;
+				console.log('Test 1 - Level2 blocked before analyze:', beforeBlocked);
+				results.push({ test: 'Level2 blocked before analyze', pass: beforeBlocked });
+
+				// 2) Executa analyzeLevel1 para forçar FEC = 5 (q1=Y,q2=Y)
+				document.querySelector(`input[name="lvl1_q1_${failId}"][value="Y"]`).checked = true;
+				document.querySelector(`input[name="lvl1_q2_${failId}"][value="Y"]`).checked = true;
+				analyzeLevel1(failId);
+				await new Promise(r => setTimeout(r, 150));
+				// Após analyze, Level2 deve aparecer e T6 deve estar visível (FEC 5)
+				const lvl2block = document.getElementById(`level2_analysis_block_${causeId}`);
+				const lvl2Visible = lvl2block && lvl2block.classList.contains('visible');
+				const t6 = document.getElementById(`lvl2_t6_block_${causeId}`);
+				const t6Visible = t6 && !t6.classList.contains('hidden');
+				console.log('Test 2 - Level2 visible after FEC5:', lvl2Visible, 'T6 visible:', t6Visible);
+				results.push({ test: 'Level2 visible after FEC5', pass: !!lvl2Visible });
+				results.push({ test: 'T6 visible for FEC5', pass: !!t6Visible });
+
+				// 3) Modifica para FEC 8 (q1=N,q3=Y)
+				document.querySelector(`input[name="lvl1_q1_${failId}"][value="N"]`).checked = true;
+				document.querySelector(`input[name="lvl1_q3_${failId}"][value="Y"]`).checked = true;
+				analyzeLevel1(failId);
+				await new Promise(r => setTimeout(r, 150));
+				const t2 = document.getElementById(`lvl2_t2_block_${causeId}`);
+				const t2Visible = t2 && !t2.classList.contains('hidden');
+				console.log('Test 3 - T2 visible for FEC8:', t2Visible);
+				results.push({ test: 'T2 visible for FEC8', pass: !!t2Visible });
+
+				// 4) Testar finalizar FMEA: cria condições e chama finalizarFmea
+				// (garantido já ter componente, função, falha e causa)
+				finalizarFmea();
+				await new Promise(r => setTimeout(r, 80));
+				const finishBtn = document.getElementById('finalizarFmeaBtn');
+				const finishHidden = finishBtn.classList.contains('hidden') || finishBtn.disabled;
+				console.log('Test 4 - Finalizar FMEA button hidden/disabled:', finishHidden);
+				results.push({ test: 'Finalizar FMEA hidden/disabled', pass: !!finishHidden });
+
+			} catch (err) {
+				console.error('Automated tests error:', err);
+				results.push({ test: 'exception', pass: false, error: String(err) });
+			}
+			console.groupEnd();
+
+			// Mostra resultados num modal simples
+			const passed = results.every(r => r.pass);
+			let summary = `Automated tests: ${passed ? 'PASS' : 'FAIL'}\n\n`;
+			results.forEach(r => { summary += `${r.test}: ${r.pass ? 'PASS' : 'FAIL'}${r.error ? ' - ' + r.error : ''}\n`; });
+			alert(summary);
+			return results;
+		};
+        
+		window.generatePDF = () => {
+			showMessage("Gerando PDF...", "info");
+			const { jsPDF } = window.jspdf;
+			const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+			const data = collectCurrentData();
+			if (!data.msiTitle) { return showMessage("Preencha ao menos o Título para gerar o PDF.", "error"); }
+			let y = 20; const pageHeight = doc.internal.pageSize.height; const margin = 20;
+			const checkPageBreak = (spaceNeeded = 10) => { if (y + spaceNeeded > pageHeight - margin) { doc.addPage(); y = margin; } };
+			// Cabeçalho do documento
+			doc.setFontSize(18); doc.text("AP-737 MCC: Relatório de Análise MSG-3", 105, y, { align: 'center' }); y += 15;
+			doc.setFontSize(14); doc.text(`MSI ${data.msiNumber}: ${data.msiTitle}`, margin, y); y += 8;
+			doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.text('Descrição:', margin, y); doc.setFont(undefined, 'normal');
+			const descLines = doc.splitTextToSize(data.msiDescription, 170); doc.text(descLines, margin + 20, y); y += descLines.length * 4 + 5;
+
+			// Critérios de Seleção de MSI
+			checkPageBreak(35); doc.line(margin, y, 195, y); y += 5;
+			doc.setFontSize(12); doc.text("0. Critérios de Seleção de MSI", margin, y); y += 7;
+			doc.setFontSize(10);
+			Object.keys(data.msiCriteria).forEach(key => { 
+				const criteria = data.msiCriteria[key]; 
+				const questionText = getQuestionText(key, 0); 
+				const answerText = `(${(criteria.answer === 'Y' ? 'Sim' : 'Não') || 'N/A'})`; 
+				const justification = criteria.justification ? `: ${criteria.justification}`: ''; 
+				const fullText = doc.splitTextToSize(`- ${questionText} ${answerText}${justification}`, 170); 
+				checkPageBreak(fullText.length * 5); 
+				doc.text(fullText, margin + 5, y); 
+				y += fullText.length * 5 + 1; 
+			});
+
+			// Tabela de Componentes
+			checkPageBreak(30); doc.line(margin, y, 195, y); y += 5;
+			doc.setFontSize(12); doc.text("1. Componentes", margin, y); y += 7;
+			const componentTableHead = [['#', 'Nome', 'ATA', 'P/N', 'MTBF', 'MTBUR']];
+			const componentTableBody = data.components.map((comp, index) => [ 
+				index + 1, 
+				comp.name || '', 
+				comp.ata || '', 
+				comp.partNumber || '', 
+				comp.mtbf || '', 
+				comp.mtbur || '' 
+			]);
+			doc.autoTable({ 
+				head: componentTableHead, 
+				body: componentTableBody, 
+				startY: y, 
+				theme: 'grid', 
+				headStyles: { fillColor: [41, 128, 185] }, 
+				styles: { fontSize: 8 } 
+			});
+			y = doc.autoTable.previous.finalY + 7;
+            
+			// Nova seção - Tabela FMEA (sempre em nova página)
+			doc.addPage(); y = margin;
+			doc.setFontSize(14); doc.text("FORMULÁRIO DE ANÁLISE DOS MODOS DE FALHA E SEUS EFEITOS (FMEA)", 105, y, { align: 'center' }); y += 10;
+            
+			// Preparar dados para a tabela FMEA
+			const fmeaTableData = [];
+			let currentFuncId = null;
+			let currentFailId = null;
+
+			data.fmea.forEach((func, funcIndex) => {
+				func.failures.forEach((fail, failIndex) => {
+					fail.causes.forEach((cause, causeIndex) => {
+						const row = [];
+						const componentName = data.components.find(c => c.id === cause.componentId)?.name || 'N/D';
+                        
+						// Só inclui função se for diferente da anterior
+						if (currentFuncId !== funcIndex) {
+							row.push(`${funcIndex + 1}`, func.functionText);
+							currentFuncId = funcIndex;
+						} else {
+							row.push('', ''); // Células vazias para função
+						}
+                        
+						// Só inclui falha se for diferente da anterior
+						const failureNum = `${funcIndex + 1}.${failIndex + 1}`;
+						const effectNum = `${funcIndex + 1}.${failIndex + 1}.1`;
+						if (currentFailId !== `${funcIndex}.${failIndex}`) {
+							row.push(
+								failureNum,
+								fail.failureText,
+								`${effectNum}: ${fail.effectText}`
+							);
+							currentFailId = `${funcIndex}.${failIndex}`;
+						} else {
+							row.push('', '', ''); // Células vazias para falha e efeito
+						}
+                        
+						// Sempre inclui a causa com letra
+						const causeLabel = String.fromCharCode(97 + causeIndex); // a, b, c, ...
+						row.push(`${effectNum}.${causeLabel}: ${componentName} - ${cause.causeNotes || ''}`);
+                        
+						fmeaTableData.push(row);
+					});
+				});
+			});
+            
+			// Gerar tabela FMEA com novo layout
+			const fmeaTableHead = [['Função', 'Descrição da Função', 'Falha', 'Falha Funcional', 'Efeito da Falha', 'Causa da Falha']];
+            
+			// Processa os dados para adicionar cores de fundo
+			const coloredFmeaData = fmeaTableData.map(row => {
+				// Se é uma linha de falha (tem conteúdo nas colunas 2-4)
+				if (row[2] && row[3] && row[4]) {
+					return {
+						...row,
+						_background: [245, 245, 245] // Cinza muito claro para falhas
+					};
+				}
+				// Se é uma linha de causa (tem conteúdo apenas na última coluna)
+				else if (!row[2] && !row[3] && !row[4] && row[5]) {
+					return {
+						...row,
+						_background: [250, 250, 250] // Cinza ainda mais claro para causas
+					};
+				}
+				return row;
+			});
+            
+			doc.autoTable({
+				head: fmeaTableHead,
+				body: coloredFmeaData,
+				startY: y,
+				theme: 'grid',
+				headStyles: { 
+					fillColor: [41, 128, 185],
+					fontSize: 9,
+					fontStyle: 'bold',
+					halign: 'center'
+				},
+				styles: { 
+					fontSize: 8,
+					cellPadding: 3,
+					lineColor: [200, 200, 200],
+					lineWidth: 0.1
+				},
+				columnStyles: {
+					0: { cellWidth: 15, halign: 'center' },  // Número da função
+					1: { cellWidth: 35 },                    // Descrição da função
+					2: { cellWidth: 15, halign: 'center' },  // Número da falha
+					3: { cellWidth: 35 },                    // Falha funcional
+					4: { cellWidth: 35 },                    // Efeito
+					5: { cellWidth: 35 }                     // Causa
+				},
+				didParseCell: function(data) {
+					// Adiciona estilo para células vazias (quando função/falha se repete)
+					if (data.row.raw[data.column.index] === '') {
+						data.cell.styles.fillColor = [250, 250, 250];
+					}
+				}
+			});
+            
+			y = doc.autoTable.previous.finalY + 10;
+			// Nova seção - Análises
+			doc.addPage(); y = margin;
+			doc.setFontSize(14); doc.text("ANÁLISES DE NÍVEL 1 E 2", 105, y, { align: 'center' }); y += 10;
+			doc.setFontSize(10);
+			const summaryTasks = [];
+			// intervalForm guarda todas as tarefas com número e justificativa do intervalo
+			const intervalForm = [];
+			data.fmea.forEach((func, funcIndex) => {
+				checkPageBreak(15); doc.setFont(undefined, 'bold'); 
+				doc.text(`Função ${funcIndex + 1}: ${func.functionText}`, margin + 5, y); y += 6; doc.setFont(undefined, 'normal');
+				func.failures.forEach((fail, failIndex) => {
+					checkPageBreak(25);
+					doc.text(`  • Falha ${funcIndex+1}.${failIndex+1}: ${fail.failureText}`, margin + 10, y); y += 5;
+					doc.text(`    Efeito: ${fail.effectText}`, margin + 15, y); y += 5;
+					doc.setFont(undefined, 'italic'); doc.text(`    Análise Nível 1:`, margin + 15, y); y += 5; doc.setFont(undefined, 'normal');
+					if(fail.level1) {
+						['q1', 'q2', 'q3', 'q4'].forEach(q => {
+							if (fail.level1[q] && fail.level1[q].answer) {
+								const qText = `${getQuestionText(q, 1)} (${fail.level1[q].answer}) ${fail.level1[q].justification || ''}`;
+								const lines = doc.splitTextToSize(qText, 150);
+								checkPageBreak(lines.length * 5); doc.text(lines, margin + 20, y); y+= (lines.length * 4) + 2;
+							}
+						});
+						doc.setFont(undefined, 'bold'); doc.text(`      Resultado: ${fail.level1.fec ? 'FEC ' + fail.level1.fec : 'Incompleto'}`, margin + 20, y); y += 7; doc.setFont(undefined, 'normal');
+					}
+					fail.causes.forEach((cause, causeIndex) => {
+						checkPageBreak(10);
+						const componentName = data.components.find(c => c.id === cause.componentId)?.name || 'N/D';
+						doc.text(`    Causa ${failIndex+1}.${causeIndex+1}: ${componentName} - ${cause.causeNotes || ''}`, margin + 15, y); y+=5;
+						doc.setFont(undefined, 'italic'); doc.text(`      Análise Nível 2:`, margin + 20, y); y += 5; doc.setFont(undefined, 'normal');
+						if(cause.level2) {
+							for (let i = 1; i <= 6; i++) {
+								const task = cause.level2[`t${i}`];
+								if(task) {
+									const answer = task.answer || 'N/A';
+									let tText = `${getQuestionText(`t${i}`, 2)} (${answer})`;
+									if (answer === 'Y' && (task.task || task.interval || task.justification)) {
+										tText += `\n    Tarefa: ${task.task || 'N/D'}\n    Intervalo: ${task.interval || 'N/D'}`;
+										if (task.justification) {
+											tText += `\n    Justificativa: ${task.justification || 'N/D'}`;
+										}
+									} else if (task.justification) {
+										tText += `\n    Justificativa: ${task.justification}`;
+									}
+									const lines = doc.splitTextToSize(tText, 145);
+									checkPageBreak(lines.length * 5); 
+									doc.text(lines, margin + 25, y); 
+									y += (lines.length * 4) + 2;
+									if(task.answer === 'Y' && task.task) {
+										// Incrementa o contador de tarefas
+										data.taskCounter++;
+										// Gera o número da tarefa no formato MSI-XXX
+										const taskNumber = `${data.msiNumber || 'MSI'}-${String(data.taskCounter).padStart(3, '0')}`;
+										// Adiciona à lista de tarefas com o novo número
+										summaryTasks.push([taskNumber, componentName, task.task, task.interval || '']);
+
+										// Adiciona ao formulário de justificativas por tarefa (mesmo que a justificativa esteja vazia)
+										intervalForm.push({ taskNumber, funcIndex, funcText: func.functionText, failIndex, failText: fail.failureText, componentName, taskIndex: i, taskDesc: task.task || '', interval: task.interval || '', intervalJustification: task.intervalJustification || '' });
+									} else {
+										// Mesmo quando a tarefa não for preenchida, ainda permitimos coletar justificativa do intervalo
+										if (task && task.intervalJustification && task.intervalJustification.toString().trim() !== '') {
+											intervalForm.push({ taskNumber: `${data.msiNumber || 'MSI'}-${String(data.taskCounter + 1).padStart(3, '0')}`, funcIndex, funcText: func.functionText, failIndex, failText: fail.failureText, componentName, taskIndex: i, taskDesc: task.task || '', interval: task.interval || '', intervalJustification: task.intervalJustification });
+										}
+									}
+								} else {
+									// Se não houver resposta para esta tarefa, mostra apenas a pergunta
+									const tText = `${getQuestionText(`t${i}`, 2)} (N/A)`;
+									doc.text(tText, margin + 25, y);
+									y += 5;
+								}
+							}
+						} else {
+							// Se não houver análise de nível 2, mostra todas as perguntas como N/A
+							for (let i = 1; i <= 6; i++) {
+								const tText = `${getQuestionText(`t${i}`, 2)} (N/A)`;
+								doc.text(tText, margin + 25, y);
+								y += 5;
+							}
+						}
+					});
+				}); y += 3;
+			});
+
+			// Imprime as justificativas de intervalo por tarefa em uma nova página, em formato de tabela
+			if (intervalForm.length > 0) {
+				// força nova página para separar claramente do conteúdo anterior
+				doc.addPage(); y = margin;
+				doc.setFontSize(14);
+				doc.text("FORMULÁRIO - JUSTIFICATIVAS DE INTERVALO POR TAREFA", 105, y, { align: 'center' });
+				y += 8;
+
+				// Monta cabeçalho e corpo da tabela no formato pedido: Número da tarefa | Tarefa | Componente | Intervalo | Justificativa
+				const intervalTableHead = [["Número da Tarefa", "Tarefa", "Componente", "Intervalo", "Justificativa"]];
+				const intervalTableBody = intervalForm.map(it => {
+					return [it.taskNumber || '', it.taskDesc || '', it.componentName || '', it.interval || '', it.intervalJustification || ''];
+				});
+
+				// Gera a tabela com autoTable (vai paginar automaticamente se necessário)
+				doc.autoTable({
+					head: intervalTableHead,
+					body: intervalTableBody,
+					startY: y,
+					theme: 'grid',
+					headStyles: { fillColor: [41, 128, 185], fontSize: 8 },
+					styles: { fontSize: 8, cellPadding: 2 },
+					columnStyles: {
+						0: { cellWidth: 20 },  // Número da tarefa
+						1: { cellWidth: 40 },  // Tarefa
+						2: { cellWidth: 25 },  // Componente
+						3: { cellWidth: 20 },  // Intervalo
+						4: { cellWidth: 75 }   // Justificativa
+					}
+				});
+
+				// atualiza y para o restante do documento
+				y = doc.autoTable.previous.finalY + 8;
+			}
+
+			if (summaryTasks.length > 0) {
+				checkPageBreak(40); doc.addPage(); y = margin;
+				doc.setFontSize(14); doc.text("RESUMO DAS TAREFAS DE MANUTENÇÃO PROPOSTAS", 105, y, { align: 'center' }); y += 10;
+				doc.autoTable({ 
+					head: [['Número da Tarefa', 'Componente', 'Descrição da Tarefa', 'Intervalo']], 
+					body: summaryTasks, 
+					startY: y, 
+					theme: 'grid', 
+					headStyles: { fillColor: [39, 174, 96] },
+					columnStyles: {
+						0: { cellWidth: 25 },
+						1: { cellWidth: 35 },
+						2: { cellWidth: 80 },
+						3: { cellWidth: 30 }
+					}
+				});
+			}
+
+			doc.save(`MSG3-${data.msiTitle.replace(/[^a-z0-9]/gi, '_')}.pdf`);
+			showMessage("PDF gerado com sucesso!", "success");
+		};
+	</script>
+	<style>
+		/* Design tokens e paleta */
+		:root {
+			--primary: #2563EB; /* blue-600 */
+			--primary-600: #1D4ED8; /* blue-700 */
+			--muted: #374151; /* gray-700 */
+			--card-bg: #ffffff;
+			--surface: #F3F4F6; /* gray-100 */
+			--success: #10B981; /* green-500 */
+			--danger: #EF4444; /* red-500 */
+			--warning: #F59E0B; /* amber-500 */
+		}
+
+		/* Reset visual base */
+		body {
+			background-color: var(--surface);
+			color: #111827;
+			font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+			-webkit-font-smoothing: antialiased;
+			-moz-osx-font-smoothing: grayscale;
+		}
+
+		/* Headings e seções */
+		.section-header {
+			margin-top: 1.5rem;
+			padding-bottom: 0.5rem;
+			border-bottom: 1px solid rgba(15,23,42,0.06);
+		}
+
+		.text-primary-blue { color: var(--primary); }
+
+		/* Cartões e blocos principais */
+		.component-block, .function-block {
+			background: var(--card-bg);
+			border: 1px solid #E5E7EB;
+			border-radius: 0.75rem;
+			padding: 1.25rem;
+			margin-bottom: 1.25rem;
+			box-shadow: 0 1px 3px rgba(2,6,23,0.04);
+			transition: transform 0.18s ease, box-shadow 0.18s ease;
+		}
+
+		.component-block:hover, .function-block:hover {
+			transform: translateY(-2px);
+			box-shadow: 0 4px 12px rgba(2,6,23,0.06);
+		}
+
+		/* Bloco de falha: destaque mais sutil */
+		.failure-block {
+			background-color: var(--card-bg);
+			border-left: 4px solid rgba(37,99,235,0.25); /* subtle blue */
+			margin-top: 1rem;
+			padding: 1rem;
+			border-radius: 0.5rem;
+			display: flex;
+			flex-direction: column;
+			transition: all 0.25s ease-in-out;
+		}
+
+		.cause-input-group {
+			border-top: 1px dashed rgba(15,23,42,0.06);
+			padding-top: 1rem;
+			margin-top: 1rem;
+		}
+
+		/* Tipografia e labels */
+		.fmea-label {
+			font-weight: 600;
+			color: var(--muted);
+			margin-bottom: 0.25rem;
+			font-size: 0.95rem;
+		}
+
+		/* Blocos de análise */
+		.level1-analysis-block, .level2-analysis-block {
+			background-color: #F8FAFC;
+			padding: 1rem;
+			border-radius: 0.5rem;
+			margin-top: 1rem;
+			border-top: 1px solid rgba(15,23,42,0.04);
+		}
+
+		/* Cards de tarefa */
+		.task-card {
+			background-color: var(--card-bg);
+			border-radius: 0.375rem;
+			padding: 0.75rem;
+			border-left: 3px solid rgba(148,163,184,0.6);
+			transition: all 0.18s ease-in-out;
+		}
+
+		.task-card:hover {
+			border-left-color: var(--primary);
+			box-shadow: 0 6px 18px rgba(2,6,23,0.06);
+		}
+
+		/* Inputs e controles (foco mais visível) */
+		.task-inputs {
+			display: grid;
+			grid-template-columns: 100px 1.5fr 1fr 1.2fr;
+			gap: 0.75rem;
+			margin-top: 0.5rem;
+			align-items: center;
+		}
+
+		.radio-group { display: flex; align-items: center; gap: 0.5rem; }
+
+		.task-input {
+			width: 100%;
+			padding: 0.4rem;
+			font-size: 0.875rem;
+			border-radius: 0.375rem;
+			border: 1px solid #E6E9EE;
+			transition: border-color 0.15s ease, box-shadow 0.15s ease;
+		}
+
+		.task-input:focus {
+			border-color: var(--primary-600);
+			outline: none;
+			box-shadow: 0 0 0 4px rgba(37,99,235,0.08);
+		}
+
+		/* Botões — override de utilitários para consistência */
+		.bg-blue-500 { background-color: var(--primary) !important; }
+		.bg-blue-600 { background-color: var(--primary-600) !important; }
+		.bg-blue-500:hover, .bg-blue-600:hover { filter: brightness(0.95); }
+		.bg-green-600 { background-color: var(--success) !important; }
+		.bg-red-600 { background-color: var(--danger) !important; }
+		.bg-yellow-500 { background-color: var(--warning) !important; }
+
+		button { cursor: pointer; border-radius: 0.5rem; }
+
+		/* Visibilidade e transições */
+		.hidden { display: none !important; }
+
+		.failure-block > * { transition: all 0.25s ease-in-out; }
+
+		.level1-analysis-block { order: 1; }
+		.level1-result { order: 2; transition: all 0.25s ease-in-out; }
+
+		.causes-container { order: 3; opacity: 0; max-height: 0; overflow: visible; transition: opacity 0.25s ease-in-out; }
+		.causes-container.visible { opacity: 1; max-height: none; overflow: visible; }
+
+		button[onclick^="addCause"] { order: 999; opacity: 0; display: block; width: 100%; margin-top: 10px; position: relative; z-index: 10; transition: opacity 0.25s ease-in-out; }
+		button[onclick^="addCause"].visible { opacity: 1; display: block; }
+
+		.level2-analysis-block { opacity: 0; max-height: 0; overflow: hidden; transition: all 0.25s ease-in-out; }
+		.level2-analysis-block.visible { opacity: 1; max-height: 2000px; overflow: visible; }
+
+		/* Responsividade */
+		@media (max-width: 1024px) { .task-inputs { grid-template-columns: 1fr 1fr; } .task-inputs .radio-group { grid-column: span 2; } }
+		@media (max-width: 768px) { .msi-question-row { grid-template-columns: 1fr; } .task-inputs { grid-template-columns: 1fr; } .task-inputs .radio-group { grid-column: auto; } }
+
+		.locked-fmea *[data-fmea-editable] { pointer-events: none; opacity: 0.6; }
+		</style>
+</head>
+<body class="p-4 sm:p-8">
+	<div id="authModal" class="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-50"><div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-sm"><h2 class="text-2xl font-bold text-primary-blue mb-6 text-center">Login / Registro</h2><div class="space-y-4"><input type="email" id="emailInput" placeholder="Seu email" class="w-full p-3 border rounded-lg"><input type="password" id="passInput" placeholder="Sua senha" class="w-full p-3 border rounded-lg"></div><div class="flex gap-4 mt-6"><button onclick="loginUser()" class="flex-1 p-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700">Entrar</button><button onclick="registerUser()" class="flex-1 p-3 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700">Registrar</button></div></div></div>
+	<div id="loadModal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center p-4 z-40"><div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-lg"><h2 class="text-2xl font-bold text-primary-blue mb-4">Carregar Análise Salva</h2><div id="analysesList" class="max-h-80 overflow-y-auto border p-2 space-y-1"></div><button onclick="document.getElementById('loadModal').classList.add('hidden')" class="mt-4 w-full p-3 bg-gray-200 rounded-lg">Fechar</button></div></div>
+
+	<div id="mainContent" class="hidden max-w-6xl mx-auto bg-white shadow-2xl rounded-xl p-6 md:p-10">
+		<header class="mb-4"><div class="flex justify-between items-start"><div><h1 class="text-3xl sm:text-4xl font-extrabold text-primary-blue mb-2">Análise MSG-3 Sistemas (AP 737 MCC - PEE 33)</h1><p class="text-gray-600">Versão 2.0.0</p></div><button id="logoutBtn" onclick="logoutUser()" class="hidden ml-4 px-4 py-2 bg-red-500 text-white font-semibold rounded-lg">Sair</button></div></header>
+
+		<!-- Nota breve de documentação sobre alterações recentes -->
+		<div class="mb-4 p-4 bg-blue-50 border-l-4 border-blue-300 rounded">
+			<strong class="text-sm text-primary-blue">Nota:</strong>
+			<p class="text-sm text-gray-700 mt-1">Adicionado o painel "Justificativas do Intervalo" (botão "Mostrar/Ocultar Justificativas dos Intervalos") para editar e salvar justificativas por tarefa. O campo <em>Número do MSI</em> é usado para gerar a numeração sequencial das tarefas no formato <code>MSI-XXX</code> e essa numeração aparece no PDF.</p>
+		</div>
+
+		<div class="mb-8 p-3 bg-gray-100 rounded-lg flex justify-between items-center text-sm"><div id="messageBox" class="font-semibold">Bem-vindo!</div><div id="userStatus" class="text-gray-600 font-mono"></div></div>
+		<div class="flex flex-wrap gap-4 mb-8">
+			<button onclick="newAnalysis()" class="flex-1 p-3 bg-blue-500 text-white font-bold rounded-lg">Nova Análise</button>
+			<button onclick="document.getElementById('loadModal').classList.remove('hidden'); loadAnalysesList();" class="flex-1 p-3 bg-gray-500 text-white font-bold rounded-lg">Carregar Análise</button>
+			<button id="saveAnalysisBtn" onclick="saveAnalysis()" class="flex-1 p-3 bg-green-600 text-white font-bold rounded-lg">Salvar Análise</button>
+			<button onclick="generatePDF()" class="flex-1 p-3 bg-red-600 text-white font-bold rounded-lg">Gerar PDF</button>
+		</div>
+		<h2 class="text-2xl font-semibold text-gray-800 section-header">0. Critérios de Seleção de MSI</h2>
+		<div class="mt-4 mb-8 space-y-2"><div class="msi-question-row hidden md:grid font-semibold text-gray-600"><span>Pergunta</span><span>Resposta (Sim/Não)</span><span>Justificativa</span></div><div class="msi-question-row bg-secondary-gray rounded-lg"><label class="font-medium text-gray-800">A falha deste candidato a MSI poderia afetar a segurança em voo ou em solo?</label><div class="flex space-x-4"><label class="flex items-center"><input type="radio" name="msi_q1_safety" value="Y" class="h-4 w-4"><span class="ml-2">Sim</span></label><label class="flex items-center"><input type="radio" name="msi_q1_safety" value="N" class="h-4 w-4"><span class="ml-2">Não</span></label></div><input type="text" id="just_q1" placeholder="Justificativa..." class="w-full p-2 border rounded-lg"></div><div class="msi-question-row bg-secondary-gray rounded-lg"><label class="font-medium text-gray-800">A falha deste candidato a MSI é indetectable durante as operações normais?</label><div class="flex space-x-4"><label class="flex items-center"><input type="radio" name="msi_q2_undetectable" value="Y" class="h-4 w-4"><span class="ml-2">Sim</span></label><label class="flex items-center"><input type="radio" name="msi_q2_undetectable" value="N" class="h-4 w-4"><span class="ml-2">Não</span></label></div><input type="text" id="just_q2" placeholder="Justificativa..." class="w-full p-2 border rounded-lg"></div><div class="msi-question-row bg-secondary-gray rounded-lg"><label class="font-medium text-gray-800">A falha deste candidato a MSI poderia ter impacto operacional significativo?</label><div class="flex space-x-4"><label class="flex items-center"><input type="radio" name="msi_q3_operational" value="Y" class="h-4 w-4"><span class="ml-2">Sim</span></label><label class="flex items-center"><input type="radio" name="msi_q3_operational" value="N" class="h-4 w-4"><span class="ml-2">Não</span></label></div><input type="text" id="just_q3" placeholder="Justificativa..." class="w-full p-2 border rounded-lg"></div><div class="msi-question-row bg-secondary-gray rounded-lg"><label class="font-medium text-gray-800">A falha deste candidato a MSI poderia ter impacto econômico significativo?</label><div class="flex space-x-4"><label class="flex items-center"><input type="radio" name="msi_q4_economic" value="Y" class="h-4 w-4"><span class="ml-2">Sim</span></label><label class="flex items-center"><input type="radio" name="msi_q4_economic" value="N" class="h-4 w-4"><span class="ml-2">Não</span></label></div><input type="text" id="just_q4" placeholder="Justificativa..." class="w-full p-2 border rounded-lg"></div></div>
+		<h2 class="text-2xl font-semibold text-gray-800 section-header">1. Detalhes da Análise do MSI</h2>
+		<div class="mb-6 mt-4 space-y-4">
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+				<div><label for="msiNumber" class="block text-sm font-medium text-gray-700 mb-1">Número do MSI:</label><input type="text" id="msiNumber" placeholder="Ex: 25-61" class="w-full p-3 border border-gray-300 rounded-lg"></div>
+				<div><label for="msiTitle" class="block text-sm font-medium text-gray-700 mb-1">Título do MSI:</label><input type="text" id="msiTitle" placeholder="Ex: APU Fire Detection System" class="w-full p-3 border border-gray-300 rounded-lg"></div>
+			</div>
+			<div><label for="msiDescription" class="block text-sm font-medium text-gray-700 mb-1">Descrição Detalhada do MSI:</label><textarea id="msiDescription" rows="4" placeholder="Descreva aqui o sistema..." class="w-full p-3 border rounded-lg"></textarea></div>
+		</div>
+		<div id="componentsContainer"></div>
+		<button id="addComponenteBtn" class="w-full px-4 py-2 mb-8 bg-blue-100 text-primary-blue font-semibold rounded-lg hover:bg-blue-200 transition">+ Adicionar Componente</button>
+		<h2 class="text-2xl font-semibold text-gray-800 section-header">2. FMEA (Form 3)</h2>
+		<div id="fmeaContainer" class="mt-4"></div>
+		<button id="addFunctionBtn" class="w-full mt-4 px-4 py-3 bg-blue-500 text-white font-semibold rounded-lg hover:bg-blue-600 transition">+ Adicionar Função</button>
+		<div class="mt-4">
+			<button id="toggleIntervalJustBtn" onclick="toggleIntervalPanel()" class="w-full px-4 py-2 bg-yellow-500 text-white font-semibold rounded-lg hover:bg-yellow-600">Mostrar/Ocultar Justificativas dos Intervalos</button>
+			<div id="intervalJustificationsPanel" class="hidden mt-3 p-3 border rounded max-h-64 overflow-auto bg-white"></div>
+		</div>
+	</div>
+
+	<script>
+	// --- BLOQUEIO FMEA ---
+	let fmeaFinalizada = false;
+	function isFmeaComplete() {
+		const comp = document.querySelectorAll('.component-block').length;
+		const func = document.querySelectorAll('.function-block').length;
+		const fail = document.querySelectorAll('.failure-block').length;
+		const cause = document.querySelectorAll('.cause-input-group').length;
+		return comp > 0 && func > 0 && fail > 0 && cause > 0;
+	}
+	window.finalizarFmea = function() {
+		if (!isFmeaComplete()) {
+			alert('Preencha todos os campos da FMEA (componentes, funções, falhas e causas) antes de finalizar.');
+			return;
+		}
+		fmeaFinalizada = true;
+		// Aplica bloqueio apenas ao container da FMEA para não interferir em toda a UI
+		document.getElementById('fmeaContainer').classList.add('locked-fmea');
+		document.getElementById('finalizarFmeaBtn').disabled = true;
+		// Esconde o botão após finalizar para evitar confusão
+		document.getElementById('finalizarFmeaBtn').classList.add('hidden');
+		showMessage('FMEA finalizada! Agora você pode iniciar as análises de nível 1 e 2.', 'success');
+	}
+		let componentIdCounter = 0, functionIdCounter = 0, failureIdCounter = 0, causeIdCounter = 0;
+		function showMessage(msg, type = "info") { const box = document.getElementById('messageBox'); box.textContent = msg; box.className = "font-semibold"; if (type === 'success') { box.classList.add('text-green-600'); } else if (type === 'error') { box.classList.add('text-red-600'); } else if (type === 'info') { box.classList.add('text-blue-600'); } }
+		function resetForm(addInitialBlocks) {
+			document.getElementById('msiTitle').value = '';
+			document.getElementById('msiDescription').value = '';
+			document.querySelectorAll('input[type="radio"]').forEach(radio => radio.checked = false);
+			document.querySelectorAll('.msi-question-row input[type="text"]').forEach(input => input.value = '');
+			document.getElementById('componentsContainer').innerHTML = '';
+			document.getElementById('fmeaContainer').innerHTML = '';
+			componentIdCounter = 0; functionIdCounter = 0; failureIdCounter = 0; causeIdCounter = 0;
+			// Restaura o estado do botão Finalizar FMEA e remove bloqueios visuais da FMEA
+			const finalizarBtn = document.getElementById('finalizarFmeaBtn');
+			if (finalizarBtn) { finalizarBtn.classList.remove('hidden'); finalizarBtn.disabled = false; }
+			const fmeaCont = document.getElementById('fmeaContainer');
+			if (fmeaCont) { fmeaCont.classList.remove('locked-fmea'); }
+			if (addInitialBlocks) { addComponente(); addFunction(); }
+		}
+        
+		function updateAllCauseSelects() {
+			const components = [];
+			document.querySelectorAll('.component-block').forEach(block => {
+				const name = block.querySelector('input:nth-of-type(2)').value;
+				const id = block.dataset.componentId;
+				if(name) components.push({ id, name });
+			});
+			const selects = document.querySelectorAll('select[data-fmea="cause-select"]');
+			selects.forEach(select => {
+				const currentValue = select.value;
+				select.innerHTML = '<option value="">Selecione um Componente...</option>';
+				components.forEach(comp => { const option = document.createElement('option'); option.value = comp.id; option.textContent = comp.name; select.appendChild(option); });
+				select.value = currentValue;
+			});
+		}
+
+		// Painel resumo: Justificativas dos Intervalos
+		window.toggleIntervalPanel = function() {
+			const panel = document.getElementById('intervalJustificationsPanel');
+			if (!panel) return;
+			if (panel.classList.contains('hidden')) {
+				buildIntervalJustificationsPanel();
+				panel.classList.remove('hidden');
+			} else {
+				panel.classList.add('hidden');
+			}
+		}
+
+		function buildIntervalJustificationsPanel() {
+			const panel = document.getElementById('intervalJustificationsPanel');
+			if (!panel) return;
+			panel.innerHTML = '';
+
+			// Coletamos todas as tarefas primeiro para ordenar
+			const tasks = [];
+			let taskCounter = 0;
+			const msiNumber = document.getElementById('msiNumber').value.trim();
+
+			document.querySelectorAll('.cause-input-group').forEach(cg => {
+				const causeId = cg.dataset.causeId;
+				const failureBlock = cg.closest('.failure-block');
+				const functionBlock = failureBlock ? failureBlock.closest('.function-block') : null;
+				const funcText = functionBlock ? (functionBlock.querySelector('[data-fmea="function"]').value || '') : '';
+				const failText = failureBlock ? (failureBlock.querySelector('[data-fmea="failure"]').value || '') : '';
+				const select = cg.querySelector('select[data-fmea="cause-select"]');
+				const compName = select ? (select.options[select.selectedIndex]?.text || '') : '';
+
+				for (let i = 1; i <= 6; i++) {
+					const taskEl = document.getElementById(`lvl2_t${i}_task_${causeId}`);
+					const intervalEl = document.getElementById(`lvl2_t${i}_interval_${causeId}`);
+					const intervalJustEl = document.getElementById(`lvl2_t${i}_interval_just_${causeId}`);
+					const answerEl = document.querySelector(`input[name="lvl2_t${i}_${causeId}"][value="Y"]:checked`);
+                    
+					if (!taskEl || !answerEl) continue;
+                    
+					const task = taskEl.value;
+					const interval = intervalEl ? intervalEl.value : '';
+					const intervalJust = intervalJustEl ? intervalJustEl.value : '';
+
+					// Só inclui se for uma tarefa válida (resposta Y e tem descrição)
+					if (task) {
+						taskCounter++;
+						const taskNumber = `${msiNumber || 'MSI'}-${String(taskCounter).padStart(3, '0')}`;
+                        
+						tasks.push({
+							taskNumber,
+							funcText,
+							failText,
+							compName,
+							taskType: i,
+							causeId,
+							task,
+							interval,
+							intervalJust,
+							el: intervalJustEl
+						});
+					}
+				}
+			});
+
+			// Agora criamos os elementos na ordem das tarefas
+			tasks.sort((a, b) => a.taskNumber.localeCompare(b.taskNumber));
+            
+			tasks.forEach(taskInfo => {
+				const row = document.createElement('div');
+				row.className = 'mb-3 border-b pb-2';
+                
+				const header = document.createElement('div');
+				header.className = 'text-sm font-semibold flex justify-between items-center';
+				header.innerHTML = `
+					<span class="text-blue-600">${taskInfo.taskNumber}</span>
+					<span class="text-gray-600">T${taskInfo.taskType}</span>
+				`;
+                
+				const context = document.createElement('div');
+				context.className = 'text-xs text-gray-600 mt-1';
+				context.textContent = `${taskInfo.funcText} › ${taskInfo.failText} › ${taskInfo.compName}`;
+                
+				const meta = document.createElement('div');
+				meta.className = 'text-sm text-gray-700 mt-1';
+				meta.innerHTML = `<strong>Tarefa:</strong> ${taskInfo.task}<br><strong>Intervalo:</strong> ${taskInfo.interval || 'N/D'}`;
+                
+				const label = document.createElement('div');
+				label.className = 'text-xs font-medium text-gray-600 mt-2';
+				label.textContent = 'Justificativa do intervalo:';
+                
+				const ta = document.createElement('textarea');
+				ta.className = 'w-full p-2 mt-1 border rounded';
+				ta.rows = 3;
+				ta.value = taskInfo.intervalJust;
+				ta.oninput = (e) => {
+					if (taskInfo.el) taskInfo.el.value = e.target.value;
+				};
+                
+				row.appendChild(header);
+				row.appendChild(context);
+				row.appendChild(meta);
+				row.appendChild(label);
+				row.appendChild(ta);
+				panel.appendChild(row);
+			});
+
+			if (!panel.hasChildNodes()) panel.innerHTML = '<p class="text-sm text-gray-600">Nenhuma tarefa com intervalo definido encontrada.</p>';
+		}
+
+		function addComponente(data = {}) { const id = componentIdCounter++; const block = document.createElement('div'); block.className = 'component-block'; block.setAttribute('data-component-id', id); block.setAttribute('data-fmea-editable', ''); block.innerHTML = `<h3 class="text-xl font-medium text-gray-800 mb-4">Componente #${id + 1}</h3><div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"><input type="text" placeholder="ATA Chapter" class="p-3 border rounded-lg" value="${data.ata || ''}"><input type="text" placeholder="Nome do Componente" oninput="updateAllCauseSelects()" class="p-3 border rounded-lg" value="${data.name || ''}"><input type="text" placeholder="Fornecedor" class="p-3 border rounded-lg" value="${data.supplier || ''}"><input type="text" placeholder="Part Number (P/N)" class="p-3 border rounded-lg" value="${data.partNumber || ''}"><input type="number" placeholder="MTBF" class="p-3 border rounded-lg" value="${data.mtbf || ''}"><input type="number" placeholder="MTBUR" class="p-3 border rounded-lg" value="${data.mtbur || ''}"></div><button class="absolute top-2 right-2 text-xs bg-gray-200 hover:bg-red-600 hover:text-white rounded-full px-2 py-1" onclick="removeComponente(${id})">Remover</button>`; document.getElementById('componentsContainer').appendChild(block); updateAllCauseSelects(); return id; }
+		function removeComponente(id) { document.querySelector(`[data-component-id="${id}"]`)?.remove(); updateAllCauseSelects(); }
+		function addFunction(data = {}) { const funcId = functionIdCounter++; const funcBlock = document.createElement('div'); funcBlock.className = 'function-block'; funcBlock.setAttribute('data-function-id', funcId); funcBlock.setAttribute('data-fmea-editable', ''); funcBlock.innerHTML = `<div class="flex justify-between items-center"><label class="fmea-label text-lg">Função #${funcId + 1}</label><button class="text-xs bg-red-200 text-red-700 hover:bg-red-600 hover:text-white rounded-full px-3 py-1" onclick="removeElement(this)">Remover Função</button></div><input type="text" data-fmea="function" placeholder="Função..." class="w-full p-2 border rounded-lg mt-1" value="${data.functionText || ''}"><div class="failures-container pl-4 mt-3"></div><button class="mt-3 px-3 py-1.5 text-sm bg-blue-200 text-blue-800 font-semibold rounded-md hover:bg-blue-300" onclick="addFailure(${funcId})">+ Adicionar Falha Funcional</button>`; document.getElementById('fmeaContainer').appendChild(funcBlock); return funcId; }
+		function addFailure(funcId, data = {}) {
+			const failId = failureIdCounter++;
+			const failuresContainer = document.querySelector(`[data-function-id="${funcId}"] .failures-container`);
+			const failBlock = document.createElement('div');
+			failBlock.className = 'failure-block';
+			failBlock.setAttribute('data-failure-id', failId);
+
+			// ESTE É O BLOCO DE HTML ÚNICO E CORRIGIDO
+			failBlock.innerHTML = `
+	<div class="flex justify-between items-center">
+		<label class="fmea-label">Falha Funcional e Efeito</label>
+		<button class="text-xs bg-gray-200 hover:bg-red-500 hover:text-white rounded-full px-3 py-1" onclick="removeElement(this)">Remover Falha</button>
+	</div>
+	<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-1">
+		<input type="text" data-fmea="failure" placeholder="Falha Funcional..." class="w-full p-2 border rounded-lg" value="${data.failureText || ''}">
+		<input type="text" data-fmea="effect" placeholder="Efeito da Falha..." class="w-full p-2 border rounded-lg" value="${data.effectText || ''}">
+	</div>
+	<div class="level1-analysis-block mt-4">
+		<h3 class="font-semibold text-gray-700 mb-2">Análise de Nível 1 para esta Falha</h3>
+		<div class="space-y-3 text-sm">
+			<div class="p-2 rounded bg-white">
+				<p>Q1. A falha é evidente para a tripulação?</p>
+				<div class="flex items-center gap-4 mt-1">
+					<div class="flex-shrink-0 space-x-4">
+						<label><input onchange="handleQuestionChange(${failId}, 'q1', this.value)" type="radio" name="lvl1_q1_${failId}" value="Y"> Sim</label>
+						<label><input onchange="handleQuestionChange(${failId}, 'q1', this.value)" type="radio" name="lvl1_q1_${failId}" value="N"> Não</label>
+					</div>
+					<input type="text" id="lvl1_q1_just_${failId}" placeholder="Justificativa..." class="w-full p-1 text-xs border rounded">
+				</div>
+			</div>
+			<div id="lvl1_q2_block_${failId}" class="p-2 rounded bg-white hidden">
+				<p>Q2. A falha tem efeito adverso na segurança?</p>
+				<div class="flex items-center gap-4 mt-1">
+					<div class="flex-shrink-0 space-x-4">
+						<label><input onchange="handleQuestionChange(${failId}, 'q2', this.value)" type="radio" name="lvl1_q2_${failId}" value="Y"> Sim</label>
+						<label><input onchange="handleQuestionChange(${failId}, 'q2', this.value)" type="radio" name="lvl1_q2_${failId}" value="N"> Não</label>
+					</div>
+					<input type="text" id="lvl1_q2_just_${failId}" placeholder="Justificativa..." class="w-full p-1 text-xs border rounded">
+				</div>
+			</div>
+			<div id="lvl1_q3_block_${failId}" class="p-2 rounded bg-white hidden">
+				<p>Q3. A falha oculta, combinada com outra, afeta a segurança?</p>
+				<div class="flex items-center gap-4 mt-1">
+					<div class="flex-shrink-0 space-x-4">
+						<label><input onchange="handleQuestionChange('${failId}', 'q3', this.value)" type="radio" name="lvl1_q3_${failId}" value="Y"> Sim</label>
+						<label><input onchange="handleQuestionChange('${failId}', 'q3', this.value)" type="radio" name="lvl1_q3_${failId}" value="N"> Não</label>
+					</div>
+					<input type="text" id="lvl1_q3_just_${failId}" placeholder="Justificativa..." class="w-full p-1 text-xs border rounded">
+				</div>
+			</div>
+			<div id="lvl1_q4_block_${failId}" class="p-2 rounded bg-white hidden">
+				<p>Q4. A falha tem efeito adverso na capacidade operacional?</p>
+				<div class="flex items-center gap-4 mt-1">
+					<div class="flex-shrink-0 space-x-4">
+						<label><input onchange="handleQuestionChange('${failId}', 'q4', this.value)" type="radio" name="lvl1_q4_${failId}" value="Y"> Sim</label>
+						<label><input onchange="handleQuestionChange('${failId}', 'q4', this.value)" type="radio" name="lvl1_q4_${failId}" value="N"> Não</label>
+					</div>
+					<input type="text" id="lvl1_q4_just_${failId}" placeholder="Justificativa..." class="w-full p-1 text-xs border rounded">
+				</div>
+			</div>
+		</div>
+		<button onclick="analyzeLevel1(${failId})" class="w-full mt-3 px-3 py-1.5 text-sm bg-indigo-600 text-white font-semibold rounded-md hover:bg-indigo-700">Analisar Nível 1</button>
+		<div class="level1-result mt-4 hidden"></div>
+	</div>
+	<div class="causes-container mt-4 space-y-4 hidden">
+		<label class="fmea-label text-xs">Causas da Falha</label>
+	</div>
+	<button class="mt-4 px-4 py-2 text-sm bg-gray-200 font-semibold rounded-md hover:bg-gray-300 add-cause-button hidden" style="width: 100%; display: block;" onclick="addCause(${failId})">+ Adicionar Causa</button>
+`;
+                
+			failuresContainer.appendChild(failBlock);
+			return failId;
+		}
+		function addCause(failId, data = {}) {
+			const causeId = causeIdCounter++;
+			const causesContainer = document.querySelector(`[data-failure-id="${failId}"] .causes-container`);
+			const failureBlock = document.querySelector(`[data-failure-id="${failId}"]`);
+			const addCauseButton = failureBlock.querySelector('.add-cause-button');
+			const fec = failureBlock.querySelector('.level1-result')?.dataset.fec;
+            
+			// Garante que o container de causas e o botão estejam visíveis
+			causesContainer.classList.remove('hidden');
+			causesContainer.classList.add('visible');
+			causesContainer.style.overflow = 'visible';
+            
+			// Move o botão para o final do container de falha
+			if (addCauseButton) {
+				failureBlock.appendChild(addCauseButton);
+				addCauseButton.classList.remove('hidden');
+				addCauseButton.classList.add('visible');
+				addCauseButton.style.display = 'block';
+			}
+            
+			const causeGroup = document.createElement('div');
+			causeGroup.className = 'cause-input-group';
+			causeGroup.setAttribute('data-cause-id', causeId);
+            
+			// Determina a visibilidade das tarefas com base no FEC atual
+			const isSafety = (fec == 5 || fec == 8);
+			const isHidden = (fec == 8 || fec == 9);
+            
+			causeGroup.innerHTML = `
+		<div class="w-full">
+			<div class="flex justify-between items-center">
+				<label class="fmea-label text-gray-600">Causa #${causeId + 1}</label>
+				<button class="text-red-500 hover:text-red-700" onclick="removeElement(this)">
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+					</svg>
+				</button>
+			</div>
+			<div class="flex items-center gap-2">
+				<select data-fmea="cause-select" class="w-full p-1.5 border rounded-lg text-sm"></select>
+				<input type="text" data-fmea="cause-notes" placeholder="Observações..." class="w-full p-1.5 border rounded-lg text-sm" value="${data.causeNotes || ''}">
+			</div>
+			<div id="level2_analysis_block_${causeId}" data-cause-id="${causeId}" class="level2-analysis-block hidden">
+				<h3 class="font-semibold text-gray-700 mb-2">Análise de Nível 2 para esta Causa</h3>
+				<div class="space-y-3 text-sm">
+					<div id="lvl2_t1_block_${causeId}" class="task-card"><p>T1. É aplicável e eficaz uma tarefa de Lubrificação ou Serviço?</p><div class="task-inputs"><div class="radio-group"><label><input type="radio" name="lvl2_t1_${causeId}" value="Y"> Sim</label><label><input type="radio" name="lvl2_t1_${causeId}" value="N"> Não</label></div><input type="text" id="lvl2_t1_task_${causeId}" placeholder="Descrição da Tarefa..." class="task-input"><input type="text" id="lvl2_t1_interval_${causeId}" placeholder="Intervalo..." class="task-input"><input type="hidden" id="lvl2_t1_interval_just_${causeId}"><input type="text" id="lvl2_t1_just_${causeId}" placeholder="Justificativa..." class="task-input"></div></div>
+					<div id="lvl2_t2_block_${causeId}" class="task-card"><p>T2. É aplicável e eficaz uma verificação para confirmar a operação?</p><div class="task-inputs"><div class="radio-group"><label><input type="radio" name="lvl2_t2_${causeId}" value="Y"> Sim</label><label><input type="radio" name="lvl2_t2_${causeId}" value="N"> Não</label></div><input type="text" id="lvl2_t2_task_${causeId}" placeholder="Descrição da Tarefa..." class="task-input"><input type="text" id="lvl2_t2_interval_${causeId}" placeholder="Intervalo..." class="task-input"><input type="hidden" id="lvl2_t2_interval_just_${causeId}"><input type="text" id="lvl2_t2_just_${causeId}" placeholder="Justificativa..." class="task-input"></div></div>
+					<div id="lvl2_t3_block_${causeId}" class="task-card"><p>T3. É aplicável e eficaz uma Inspeção ou Verificação Funcional?</p><div class="task-inputs"><div class="radio-group"><label><input type="radio" name="lvl2_t3_${causeId}" value="Y"> Sim</label><label><input type="radio" name="lvl2_t3_${causeId}" value="N"> Não</label></div><input type="text" id="lvl2_t3_task_${causeId}" placeholder="Descrição da Tarefa..." class="task-input"><input type="text" id="lvl2_t3_interval_${causeId}" placeholder="Intervalo..." class="task-input"><input type="hidden" id="lvl2_t3_interval_just_${causeId}"><input type="text" id="lvl2_t3_just_${causeId}" placeholder="Justificativa..." class="task-input"></div></div>
+					<div id="lvl2_t4_block_${causeId}" class="task-card"><p>T4. É aplicável e eficaz uma tarefa de Restauração?</p><div class="task-inputs"><div class="radio-group"><label><input type="radio" name="lvl2_t4_${causeId}" value="Y"> Sim</label><label><input type="radio" name="lvl2_t4_${causeId}" value="N"> Não</label></div><input type="text" id="lvl2_t4_task_${causeId}" placeholder="Descrição da Tarefa..." class="task-input"><input type="text" id="lvl2_t4_interval_${causeId}" placeholder="Intervalo..." class="task-input"><input type="hidden" id="lvl2_t4_interval_just_${causeId}"><input type="text" id="lvl2_t4_just_${causeId}" placeholder="Justificativa..." class="task-input"></div></div>
+					<div id="lvl2_t5_block_${causeId}" class="task-card"><p>T5. É aplicável e eficaz uma tarefa de Descarte?</p><div class="task-inputs"><div class="radio-group"><label><input type="radio" name="lvl2_t5_${causeId}" value="Y"> Sim</label><label><input type="radio" name="lvl2_t5_${causeId}" value="N"> Não</label></div><input type="text" id="lvl2_t5_task_${causeId}" placeholder="Descrição da Tarefa..." class="task-input"><input type="text" id="lvl2_t5_interval_${causeId}" placeholder="Intervalo..." class="task-input"><input type="hidden" id="lvl2_t5_interval_just_${causeId}"><input type="text" id="lvl2_t5_just_${causeId}" placeholder="Justificativa..." class="task-input"></div></div>
+					<div id="lvl2_t6_block_${causeId}" class="task-card"><p>T6. É aplicável e eficaz uma combinação de Tarefas?</p><div class="task-inputs"><div class="radio-group"><label><input type="radio" name="lvl2_t6_${causeId}" value="Y"> Sim</label><label><input type="radio" name="lvl2_t6_${causeId}" value="N"> Não</label></div><input type="text" id="lvl2_t6_task_${causeId}" placeholder="Descrição da Tarefa..." class="task-input"><input type="text" id="lvl2_t6_interval_${causeId}" placeholder="Intervalo..." class="task-input"><input type="hidden" id="lvl2_t6_interval_just_${causeId}"><input type="text" id="lvl2_t6_just_${causeId}" placeholder="Justificativa..." class="task-input"></div></div>
+				</div>
+				<button onclick="analyzeLevel2(${causeId})" class="w-full mt-3 px-3 py-1.5 text-sm bg-green-600 text-white font-semibold rounded-md hover:bg-green-700">Finalizar Análise de Tarefa</button>
+				<div class="level2-result mt-4 hidden"></div>
+			</div>
+		</div>
+	`;
+			causesContainer.appendChild(causeGroup);
+			updateAllCauseSelects();
+			const select = causeGroup.querySelector('select');
+			if (data.componentId) { select.value = data.componentId; }
+            
+			// Atualiza numeração das causas e garante visibilidade
+			updateCauseNumbers(failureBlock);
+			// Debug: inspeciona o bloco de nível 2 recém-criado
+			const lvl2 = document.getElementById(`level2_analysis_block_${causeId}`);
+			if (lvl2) {
+				const taskCount = lvl2.querySelectorAll('.task-card').length;
+				const hasBtn = !!lvl2.querySelector('button');
+				// Se já tivermos um FEC, force mostrar imediatamente (proteção contra delays)
+				if (fec) {
+					lvl2.classList.remove('hidden');
+					lvl2.classList.add('visible');
+					setTimeout(() => {
+						lvl2.style.maxHeight = (lvl2.scrollHeight + 200) + 'px';
+					}, 80);
+				}
+			}
+			// Se não houver FEC (nível 1 não analisado), insere nota discreta de bloqueio
+			const currentFec = failureBlock?.querySelector('.level1-result')?.dataset.fec;
+			if (!currentFec) {
+				const causesCont = failureBlock.querySelector('.causes-container');
+				if (causesCont && !causesCont.querySelector('.level2-locked-note')) {
+					const note = document.createElement('p');
+					note.className = 'level2-locked-note text-sm text-gray-600 italic';
+					note.textContent = 'Análise Nível 2 bloqueada: finalize a Análise de Nível 1 (clique em "Analisar Nível 1") para liberar as tarefas.';
+					causesCont.insertBefore(note, causesCont.firstChild);
+				}
+			}
+			// Chama showLevel2Questions para garantir exibição da análise de nível 2
+	const fecAtual = failureBlock.querySelector('.level1-result')?.dataset.fec;
+	if (fecAtual) {
+		showLevel2Questions(failId, fecAtual);
+	}
+			return causeId;
+		}
+		function removeElement(button) { 
+			const element = button.closest('.function-block, .failure-block, .cause-input-group');
+			if (element) {
+				// Se for uma causa sendo removida, atualize a numeração das causas restantes
+				if (element.classList.contains('cause-input-group')) {
+					const failureBlock = element.closest('.failure-block');
+					element.remove();
+					updateCauseNumbers(failureBlock);
+                    
+					// Garante que o botão de adicionar causa permaneça visível
+					const addCauseButton = failureBlock.querySelector('.add-cause-button');
+					if (addCauseButton) {
+						addCauseButton.classList.remove('hidden');
+						addCauseButton.classList.add('visible');
+					}
+				} else {
+					element.remove();
+				}
+			}
+		}
+
+		// Função para atualizar a numeração das causas após remoção ou adição
+		function updateCauseNumbers(failureBlock) {
+			const causes = failureBlock.querySelectorAll('.cause-input-group');
+			causes.forEach((cause, index) => {
+				const label = cause.querySelector('.fmea-label');
+				if (label) {
+					label.textContent = `Causa #${index + 1}`;
+				}
+			});
+            
+			// Atualiza visibilidade do container de causas
+			const causesContainer = failureBlock.querySelector('.causes-container');
+			if (causesContainer && causes.length > 0) {
+				causesContainer.classList.remove('hidden');
+				causesContainer.classList.add('visible');
+			}
+		}
+
+		document.addEventListener('DOMContentLoaded', () => {
+			document.getElementById('addComponenteBtn').addEventListener('click', () => addComponente());
+			document.getElementById('addFunctionBtn').addEventListener('click', () => addFunction());
+
+			// Adiciona um observer para monitorar mudanças no DOM
+			const observer = new MutationObserver((mutations) => {
+				mutations.forEach((mutation) => {
+					if (mutation.addedNodes.length) {
+						mutation.addedNodes.forEach((node) => {
+							if (node.classList && node.classList.contains('cause-input-group')) {
+								const failureBlock = node.closest('.failure-block');
+								if (failureBlock) {
+									const fecRaw = failureBlock.querySelector('.level1-result')?.dataset.fec;
+									const fecNum = Number(fecRaw);
+									// Só dispara showLevel2Questions se o FEC for um número inteiro válido (5 a 9)
+									if (Number.isInteger(fecNum) && fecNum >= 5 && fecNum <= 9) {
+										setTimeout(() => {
+											showLevel2Questions(failureBlock.dataset.failureId, fecNum);
+										}, 50);
+									}
+								}
+							}
+						});
+					}
+				});
+			});
+
+			// Observa mudanças em todo o container principal
+			observer.observe(document.getElementById('mainContent'), {
+				childList: true,
+				subtree: true
+			});
+		});
+
+		window.addFailure = addFailure;
+		window.addCause = addCause;
+		window.removeElement = removeElement;
+		window.removeComponente = removeComponente;
+		window.showMessage = (msg, type) => { const box = document.getElementById('messageBox'); box.textContent = msg; box.className = "font-semibold"; if (type === 'success') { box.classList.add('text-green-600'); } else if (type === 'error') { box.classList.add('text-red-600'); } else if (type === 'info') { box.classList.add('text-blue-600'); } };
+		window.updateAllCauseSelects = updateAllCauseSelects;
+	</script>
+</body>
+</html>
+</content>
